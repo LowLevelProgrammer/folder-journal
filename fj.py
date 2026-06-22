@@ -8,17 +8,36 @@ import subprocess
 import shutil
 import os
 import random
+import tempfile
 from pathlib import Path
 from collections import defaultdict
+
+import unicodedata
 
 # ----------------------------
 # HELPER
 # ----------------------------
 
-import unicodedata
-
 def safe_view_string(s: str) -> str:
     return unicodedata.normalize("NFC", s)
+
+def atomic_write(path: Path, data: str):
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent))
+
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, path)
+
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise
 
 # ----------------------------
 # STORE PATHS
@@ -54,13 +73,13 @@ def save_projects(data):
     PROJECTS.write_text(json.dumps(data, indent=2))
 
 # ----------------------------
-# PATH NORMALIZATION
+# PATH HELPERS
 # ----------------------------
 
 def normalize_path(p: str) -> str:
     return str(Path(p).expanduser().resolve(strict=False))
 
-def to_relative(path: Path, root: Path) -> str:
+def to_relative(path: Path, root: Path):
     try:
         return str(path.relative_to(root))
     except ValueError:
@@ -118,7 +137,7 @@ def add_project(path, name=None):
     print(f"Root: {path}")
 
 # ----------------------------
-# SNAPSHOT ENGINE
+# SNAPSHOT ENGINE (ATOMIC)
 # ----------------------------
 
 def sha256_file(path):
@@ -139,6 +158,7 @@ def snapshot(name):
     ts = int(time.time())
 
     out_file = SNAPSHOTS / name / f"{ts}.jsonl"
+    latest = SNAPSHOTS / name / "latest.jsonl"
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
     files = [f for f in root.rglob("*") if f.is_file()]
@@ -148,30 +168,34 @@ def snapshot(name):
     print(f"Root: {root}")
     print(f"Files: {total}\n")
 
-    with open(out_file, "w", encoding="utf-8") as out:
-        for i, f in enumerate(files, 1):
-            try:
-                rel = to_relative(f.resolve(), root)
-                if rel is None:
-                    continue
+    lines = []
 
-                entry = {
-                    "snapshot": ts,
-                    "path": rel,
-                    "hash": sha256_file(f),
-                }
+    for i, f in enumerate(files, 1):
+        try:
+            rel = to_relative(f.resolve(), root)
+            if rel is None:
+                continue
 
-                out.write(json.dumps(entry) + "\n")
+            entry = {
+                "snapshot": ts,
+                "path": rel,
+                "hash": sha256_file(f),
+            }
 
-            except Exception:
-                pass
+            lines.append(json.dumps(entry))
 
-            if total:
-                pct = int(i * 100 / total)
-                print(f"\rProgress: {i}/{total} ({pct}%)", end="")
+        except Exception:
+            pass
 
-    latest = SNAPSHOTS / name / "latest.jsonl"
-    latest.write_text(out_file.read_text())
+        if total:
+            pct = int(i * 100 / total)
+            print(f"\rProgress: {i}/{total} ({pct}%)", end="")
+
+    data = "\n".join(lines) + "\n"
+
+    # atomic snapshot write
+    atomic_write(out_file, data)
+    atomic_write(latest, data)
 
     print(f"\nDone snapshot: {name} ({ts})")
 
@@ -186,12 +210,12 @@ def view(name, out_file=None):
         print("Unknown project")
         return
 
-    root_name = name
-
     latest = SNAPSHOTS / name / "latest.jsonl"
     if not latest.exists():
         print("No snapshot found")
         return
+
+    root_name = name
 
     paths = []
     for line in latest.read_text().splitlines():
@@ -202,7 +226,7 @@ def view(name, out_file=None):
     output = "\n".join(output)
 
     if out_file:
-        Path(out_file).write_text(output, encoding="utf-8")
+        atomic_write(Path(out_file), output)
         print(f"View written to {out_file}")
         return
 
@@ -268,7 +292,7 @@ def tree(name, out_file=None):
     output = "\n".join(output)
 
     if out_file:
-        Path(out_file).write_text(output, encoding="utf-8")
+        atomic_write(Path(out_file), output)
         print(f"Tree written to {out_file}")
         return
 
