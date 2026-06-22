@@ -6,6 +6,8 @@ import time
 import hashlib
 import subprocess
 import shutil
+import os
+import random
 from pathlib import Path
 from collections import defaultdict
 
@@ -52,11 +54,17 @@ def save_projects(data):
     PROJECTS.write_text(json.dumps(data, indent=2))
 
 # ----------------------------
-# PATH NORMALIZATION (CANONICAL)
+# PATH NORMALIZATION
 # ----------------------------
 
 def normalize_path(p: str) -> str:
     return str(Path(p).expanduser().resolve(strict=False))
+
+def to_relative(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return None
 
 # ----------------------------
 # NAME GENERATION
@@ -64,8 +72,6 @@ def normalize_path(p: str) -> str:
 
 ADJ = ["silent", "blue", "red", "ancient", "quiet", "golden", "bright", "cold", "wild", "dark"]
 NOUN = ["forest", "river", "mountain", "sky", "cloud", "harbor", "valley", "stone", "wind", "field"]
-
-import random
 
 def random_name():
     return f"{random.choice(ADJ)}-{random.choice(NOUN)}"
@@ -109,7 +115,7 @@ def add_project(path, name=None):
     (SNAPSHOTS / name).mkdir(parents=True, exist_ok=True)
 
     print(f"Created project: {name}")
-    print(f"Path: {path}")
+    print(f"Root: {path}")
 
 # ----------------------------
 # SNAPSHOT ENGINE
@@ -129,28 +135,34 @@ def snapshot(name):
         print("Unknown project")
         return
 
-    base = Path(projects[name])
+    root = Path(projects[name]).resolve()
     ts = int(time.time())
 
     out_file = SNAPSHOTS / name / f"{ts}.jsonl"
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
-    files = [f for f in base.rglob("*") if f.is_file()]
+    files = [f for f in root.rglob("*") if f.is_file()]
     total = len(files)
 
     print(f"Snapshot: {name}")
-    print(f"Path: {base}")
+    print(f"Root: {root}")
     print(f"Files: {total}\n")
 
     with open(out_file, "w", encoding="utf-8") as out:
         for i, f in enumerate(files, 1):
             try:
+                rel = to_relative(f.resolve(), root)
+                if rel is None:
+                    continue
+
                 entry = {
                     "snapshot": ts,
-                    "path": normalize_path(str(f)),
+                    "path": rel,
                     "hash": sha256_file(f),
                 }
+
                 out.write(json.dumps(entry) + "\n")
+
             except Exception:
                 pass
 
@@ -168,8 +180,15 @@ def snapshot(name):
 # ----------------------------
 
 def view(name, out_file=None):
-    latest = SNAPSHOTS / name / "latest.jsonl"
+    projects = load_projects()
 
+    if name not in projects:
+        print("Unknown project")
+        return
+
+    root_name = name
+
+    latest = SNAPSHOTS / name / "latest.jsonl"
     if not latest.exists():
         print("No snapshot found")
         return
@@ -179,7 +198,8 @@ def view(name, out_file=None):
         obj = json.loads(line)
         paths.append(safe_view_string(obj["path"]))
 
-    output = "\n".join(sorted(paths))
+    output = [f"[{root_name}]/"] + sorted(paths)
+    output = "\n".join(output)
 
     if out_file:
         Path(out_file).write_text(output, encoding="utf-8")
@@ -222,21 +242,30 @@ def load_snapshot_paths(name):
     if not latest.exists():
         return []
 
-    return sorted(
+    return [
         safe_view_string(json.loads(l)["path"])
         for l in latest.read_text().splitlines()
-    )
+    ]
 
 def tree(name, out_file=None):
-    paths = load_snapshot_paths(name)
+    projects = load_projects()
 
+    if name not in projects:
+        print("Unknown project")
+        return
+
+    root_name = name
+
+    paths = load_snapshot_paths(name)
     if not paths:
         print("No snapshot found")
         return
 
     t = build_tree(paths)
     lines = render_tree(t)
-    output = "\n".join(lines)
+
+    output = [f"[{root_name}]/"] + lines
+    output = "\n".join(output)
 
     if out_file:
         Path(out_file).write_text(output, encoding="utf-8")
@@ -282,10 +311,6 @@ def diff(name, a, b):
 # ----------------------------
 
 def print_or_less(text):
-    import os
-    import shutil
-    import subprocess
-
     lines = text.count("\n")
     height = shutil.get_terminal_size((80, 20)).lines
 
