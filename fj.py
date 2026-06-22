@@ -10,6 +10,15 @@ from pathlib import Path
 from collections import defaultdict
 
 # ----------------------------
+# HELPER
+# ----------------------------
+
+import unicodedata
+
+def safe_view_string(s: str) -> str:
+    return unicodedata.normalize("NFC", s)
+
+# ----------------------------
 # STORE PATHS
 # ----------------------------
 
@@ -168,7 +177,7 @@ def view(name, out_file=None):
     paths = []
     for line in latest.read_text().splitlines():
         obj = json.loads(line)
-        paths.append(obj["path"])
+        paths.append(safe_view_string(obj["path"]))
 
     output = "\n".join(sorted(paths))
 
@@ -214,7 +223,7 @@ def load_snapshot_paths(name):
         return []
 
     return sorted(
-        json.loads(l)["path"]
+        safe_view_string(json.loads(l)["path"])
         for l in latest.read_text().splitlines()
     )
 
@@ -273,11 +282,23 @@ def diff(name, a, b):
 # ----------------------------
 
 def print_or_less(text):
+    import os
+    import shutil
+    import subprocess
+
     lines = text.count("\n")
     height = shutil.get_terminal_size((80, 20)).lines
 
     if lines > height * 2:
-        subprocess.run(["less"], input=text.encode())
+        env = os.environ.copy()
+        env["LESSCHARSET"] = "utf-8"
+
+        subprocess.run(
+            ["less", "-R"],
+            input=text,
+            text=True,
+            env=env
+        )
     else:
         print(text)
 
