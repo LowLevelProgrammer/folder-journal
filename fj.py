@@ -215,7 +215,8 @@ def view(name, out_file=None):
         print("No snapshot found")
         return
 
-    root_name = name
+    root_path = Path(projects[name])
+    root_name = root_path.name
 
     paths = []
     for line in latest.read_text().splitlines():
@@ -278,7 +279,8 @@ def tree(name, out_file=None):
         print("Unknown project")
         return
 
-    root_name = name
+    root_path = Path(projects[name])
+    root_name = root_path.name
 
     paths = load_snapshot_paths(name)
     if not paths:
