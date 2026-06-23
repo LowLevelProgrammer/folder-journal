@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import re
 import sys
 import json
 import time
@@ -11,12 +12,17 @@ import random
 import tempfile
 from pathlib import Path
 from collections import defaultdict
-
 import unicodedata
+
 
 # ----------------------------
 # HELPER
 # ----------------------------
+
+NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+def validate_name(name):
+    return bool(NAME_RE.fullmatch(name))
 
 def safe_view_string(s: str) -> str:
     return unicodedata.normalize("NFC", s)
@@ -70,7 +76,10 @@ def load_projects():
     return json.loads(PROJECTS.read_text())
 
 def save_projects(data):
-    PROJECTS.write_text(json.dumps(data, indent=2))
+    atomic_write(
+        PROJECTS,
+        json.dumps(data, indent=2)
+    )
 
 # ----------------------------
 # PATH HELPERS
@@ -113,11 +122,15 @@ def generate_name(projects):
 # ----------------------------
 
 def add_project(path, name=None):
+    if name and not validate_name(name):
+        print("Invalid project name")
+        sys.exit(1)
+
     projects = load_projects()
 
     if not path:
         print("Usage: fj add <path> [--name name]")
-        return
+        sys.exit(1)
 
     path = normalize_path(path)
 
@@ -126,7 +139,17 @@ def add_project(path, name=None):
 
     if name in projects:
         print("Error: name already exists")
-        return
+        sys.exit(1)
+
+    p = Path(path)
+
+    if not p.exists():
+        print("Path does not exist")
+        sys.exit(1)
+
+    if not p.is_dir():
+        print("Path is not a directory")
+        sys.exit(1)
 
     projects[name] = path
     save_projects(projects)
@@ -152,7 +175,7 @@ def snapshot(name):
 
     if name not in projects:
         print("Unknown project")
-        return
+        sys.exit(1)
 
     root = Path(projects[name]).resolve()
     ts = int(time.time())
@@ -208,12 +231,12 @@ def view(name, out_file=None):
 
     if name not in projects:
         print("Unknown project")
-        return
+        sys.exit(1)
 
     latest = SNAPSHOTS / name / "latest.jsonl"
     if not latest.exists():
         print("No snapshot found")
-        return
+        sys.exit(1)
 
     root_path = Path(projects[name])
     root_name = root_path.name
@@ -277,7 +300,7 @@ def tree(name, out_file=None):
 
     if name not in projects:
         print("Unknown project")
-        return
+        sys.exit(1)
 
     root_path = Path(projects[name])
     root_name = root_path.name
@@ -285,7 +308,7 @@ def tree(name, out_file=None):
     paths = load_snapshot_paths(name)
     if not paths:
         print("No snapshot found")
-        return
+        sys.exit(1)
 
     t = build_tree(paths)
     lines = render_tree(t)
@@ -317,7 +340,7 @@ def diff(name, a, b):
 
     if not A.exists() or not B.exists():
         print("Snapshot not found")
-        return
+        sys.exit(1)
 
     A = load_snapshot(A)
     B = load_snapshot(B)
@@ -419,30 +442,69 @@ def main():
 
         if "--name" in sys.argv:
             i = sys.argv.index("--name")
+
+            if i + 1 >= len(sys.argv):
+                print("--name requires a value")
+                sys.exit(1)
+
             name = sys.argv[i + 1]
+
+            if name.startswith("-"):
+                print("--name requires a value")
+                sys.exit(1)
 
         add_project(path, name)
 
     elif cmd == "snapshot":
+        if len(sys.argv) != 3:
+            print("Usage: fj snapshot <name>")
+            sys.exit(1)
+
         snapshot(sys.argv[2])
 
     elif cmd == "view":
+        if len(sys.argv) < 3:
+            print("Usage: fj view <name> [--out file]")
+            sys.exit(1)
+
         name = sys.argv[2]
         out = None
 
         if "--out" in sys.argv:
             i = sys.argv.index("--out")
+
+            if i + 1 >= len(sys.argv):
+                print("--out requires a value")
+                sys.exit(1)
+
             out = sys.argv[i + 1]
+
+            if out.startswith("-"):
+                print("--out requires a value")
+                sys.exit(1)
 
         view(name, out)
 
     elif cmd == "tree":
+        if len(sys.argv) < 3:
+            print("Usage: fj tree <name> [--out file]")
+            sys.exit(1)
+
         name = sys.argv[2]
         out = None
 
         if "--out" in sys.argv:
             i = sys.argv.index("--out")
+
+            if i + 1 >= len(sys.argv):
+                print("--out requires a value")
+                sys.exit(1)
+
             out = sys.argv[i + 1]
+
+            if out.startswith("-"):
+                print("--out requires a value")
+                sys.exit(1)
 
         tree(name, out)
 
@@ -450,6 +512,10 @@ def main():
         list_projects("-f" in sys.argv)
 
     elif cmd == "diff":
+        if len(sys.argv) != 5:
+            print("Usage: fj diff <name> <a> <b>")
+            sys.exit(1)
+
         diff(sys.argv[2], sys.argv[3], sys.argv[4])
 
     else:
