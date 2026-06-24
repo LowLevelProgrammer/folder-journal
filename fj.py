@@ -184,7 +184,10 @@ def snapshot(name):
     latest = SNAPSHOTS / name / "latest.jsonl"
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
-    files = [f for f in root.rglob("*") if f.is_file()]
+    files = sorted(
+        (f for f in root.rglob("*") if f.is_file()),
+        key=lambda p: str(p)
+    )
     total = len(files)
 
     print(f"Snapshot: {name}")
