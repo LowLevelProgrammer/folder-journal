@@ -6,14 +6,13 @@ import json
 import time
 import hashlib
 import subprocess
-import shutil
 import os
 import random
 import tempfile
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime
 import unicodedata
-
 
 # ----------------------------
 # HELPER
@@ -21,11 +20,14 @@ import unicodedata
 
 NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
+
 def validate_name(name):
     return bool(NAME_RE.fullmatch(name))
 
+
 def safe_view_string(s: str) -> str:
     return unicodedata.normalize("NFC", s)
+
 
 def atomic_write(path: Path, data: str):
     tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent))
@@ -45,6 +47,7 @@ def atomic_write(path: Path, data: str):
             pass
         raise
 
+
 # ----------------------------
 # STORE PATHS
 # ----------------------------
@@ -57,6 +60,7 @@ SNAPSHOTS = STORE / "snapshots"
 # INIT STORE
 # ----------------------------
 
+
 def init_store():
     STORE.mkdir(parents=True, exist_ok=True)
     SNAPSHOTS.mkdir(parents=True, exist_ok=True)
@@ -66,27 +70,30 @@ def init_store():
 
     print(f"Initialized fj store at {STORE}")
 
+
 # ----------------------------
 # PROJECT STORAGE
 # ----------------------------
+
 
 def load_projects():
     if not PROJECTS.exists():
         return {}
     return json.loads(PROJECTS.read_text())
 
+
 def save_projects(data):
-    atomic_write(
-        PROJECTS,
-        json.dumps(data, indent=2)
-    )
+    atomic_write(PROJECTS, json.dumps(data, indent=2))
+
 
 # ----------------------------
 # PATH HELPERS
 # ----------------------------
 
+
 def normalize_path(p: str) -> str:
     return str(Path(p).expanduser().resolve(strict=False))
+
 
 def to_relative(path: Path, root: Path):
     try:
@@ -94,15 +101,40 @@ def to_relative(path: Path, root: Path):
     except ValueError:
         return None
 
+
 # ----------------------------
 # NAME GENERATION
 # ----------------------------
 
-ADJ = ["silent", "blue", "red", "ancient", "quiet", "golden", "bright", "cold", "wild", "dark"]
-NOUN = ["forest", "river", "mountain", "sky", "cloud", "harbor", "valley", "stone", "wind", "field"]
+ADJ = [
+    "silent",
+    "blue",
+    "red",
+    "ancient",
+    "quiet",
+    "golden",
+    "bright",
+    "cold",
+    "wild",
+    "dark",
+]
+NOUN = [
+    "forest",
+    "river",
+    "mountain",
+    "sky",
+    "cloud",
+    "harbor",
+    "valley",
+    "stone",
+    "wind",
+    "field",
+]
+
 
 def random_name():
     return f"{random.choice(ADJ)}-{random.choice(NOUN)}"
+
 
 def generate_name(projects):
     for _ in range(50):
@@ -117,9 +149,11 @@ def generate_name(projects):
             return n
         i += 1
 
+
 # ----------------------------
 # ADD PROJECT
 # ----------------------------
+
 
 def add_project(path, name=None):
     if name and not validate_name(name):
@@ -159,9 +193,11 @@ def add_project(path, name=None):
     print(f"Created project: {name}")
     print(f"Root: {path}")
 
+
 # ----------------------------
 # SNAPSHOT ENGINE (ATOMIC)
 # ----------------------------
+
 
 def sha256_file(path):
     h = hashlib.sha256()
@@ -169,6 +205,7 @@ def sha256_file(path):
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
 
 def snapshot(name):
     projects = load_projects()
@@ -186,12 +223,8 @@ def snapshot(name):
 
     # Never snapshot fj's own metadata store.
     files = sorted(
-        (
-            f for f in root.rglob("*")
-            if f.is_file()
-            and STORE not in f.parents
-        ),
-        key=lambda p: str(p)
+        (f for f in root.rglob("*") if f.is_file() and STORE not in f.parents),
+        key=lambda p: str(p),
     )
     total = len(files)
 
@@ -230,9 +263,46 @@ def snapshot(name):
 
     print(f"\nDone snapshot: {name} ({ts})")
 
+
+# ----------------------------
+# LOG
+# ----------------------------
+
+
+def log_project(name):
+    projects = load_projects()
+
+    if name not in projects:
+        print("Unknown project", file=sys.stderr)
+        sys.exit(1)
+
+    snapshot_path = SNAPSHOTS / name
+
+    snapshots = [
+        f for f in snapshot_path.iterdir() if f.is_file() and f.name != "latest.jsonl"
+    ]
+
+    if not snapshots:
+        display("No snapshots.")
+        return
+
+    snapshots.sort(key=lambda p: int(p.stem), reverse=True)
+
+    lines = []
+
+    for f in snapshots:
+        ts = int(f.stem)
+        dt = datetime.fromtimestamp(ts)
+
+        lines.append(f"{dt:%Y-%m-%d %H:%M:%S}  {ts}")
+
+    display("\n".join(lines))
+
+
 # ----------------------------
 # VIEW
 # ----------------------------
+
 
 def view(name, out_file=None):
     projects = load_projects()
@@ -264,9 +334,11 @@ def view(name, out_file=None):
 
     display(output)
 
+
 # ----------------------------
 # TREE
 # ----------------------------
+
 
 def build_tree(paths):
     tree = lambda: defaultdict(tree)
@@ -279,12 +351,13 @@ def build_tree(paths):
 
     return root
 
+
 def render_tree(node, prefix=""):
     lines = []
     keys = sorted(node.keys())
 
     for i, k in enumerate(keys):
-        last = (i == len(keys) - 1)
+        last = i == len(keys) - 1
         connector = "└── " if last else "├── "
         lines.append(prefix + connector + k)
 
@@ -293,15 +366,16 @@ def render_tree(node, prefix=""):
 
     return lines
 
+
 def load_snapshot_paths(name):
     latest = SNAPSHOTS / name / "latest.jsonl"
     if not latest.exists():
         return []
 
     return [
-        safe_view_string(json.loads(l)["path"])
-        for l in latest.read_text().splitlines()
+        safe_view_string(json.loads(l)["path"]) for l in latest.read_text().splitlines()
     ]
+
 
 def tree(name, out_file=None):
     projects = load_projects()
@@ -331,9 +405,11 @@ def tree(name, out_file=None):
 
     display(output)
 
+
 # ----------------------------
 # DIFF
 # ----------------------------
+
 
 def load_snapshot(file):
     data = {}
@@ -341,6 +417,7 @@ def load_snapshot(file):
         obj = json.loads(line)
         data[obj["path"]] = obj["hash"]
     return data
+
 
 def diff(name, a, b):
     A = SNAPSHOTS / name / f"{a}.jsonl"
@@ -363,9 +440,11 @@ def diff(name, a, b):
         elif A[k] != B[k]:
             print("*", k)
 
+
 # ----------------------------
 # OUTPUT HANDLER
 # ----------------------------
+
 
 def display(text):
     env = os.environ.copy()
@@ -378,9 +457,11 @@ def display(text):
         env=env,
     )
 
+
 # ----------------------------
 # LIST
 # ----------------------------
+
 
 def list_projects(full=False):
     projects = load_projects()
@@ -392,9 +473,11 @@ def list_projects(full=False):
         for k in projects:
             print(k)
 
+
 # ----------------------------
 # USAGE
 # ----------------------------
+
 
 def usage():
     print("""
@@ -411,6 +494,9 @@ PROJECTS:
 SNAPSHOTS:
   fj snapshot <name>
 
+SNAPSHOTS HISTORY:
+  fj log <name>
+
 VIEW:
   fj view <name> [--out file]
 
@@ -421,9 +507,11 @@ DIFF:
   fj diff <name> <a> <b>
 """)
 
+
 # ----------------------------
 # CLI
 # ----------------------------
+
 
 def main():
     if len(sys.argv) < 2:
@@ -515,13 +603,21 @@ def main():
 
     elif cmd == "diff":
         if len(sys.argv) != 5:
-            print("Usage: fj diff <name> <a> <b>")
+            print("Usage: fj diff <name> <a> <b>", file=sys.stderr)
             sys.exit(1)
 
         diff(sys.argv[2], sys.argv[3], sys.argv[4])
 
+    elif cmd == "log":
+        if len(sys.argv) != 3:
+            print("Usage: fj log <name>", file=sys.stderr)
+            sys.exit(1)
+
+        log_project(sys.argv[2])
+
     else:
         usage()
+
 
 if __name__ == "__main__":
     try:
