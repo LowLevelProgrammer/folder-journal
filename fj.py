@@ -262,7 +262,7 @@ def view(name, out_file=None):
         print(f"View written to {out_file}")
         return
 
-    print_or_less(output)
+    display(output)
 
 # ----------------------------
 # TREE
@@ -329,7 +329,7 @@ def tree(name, out_file=None):
         print(f"Tree written to {out_file}")
         return
 
-    print_or_less(output)
+    display(output)
 
 # ----------------------------
 # DIFF
@@ -367,22 +367,16 @@ def diff(name, a, b):
 # OUTPUT HANDLER
 # ----------------------------
 
-def print_or_less(text):
-    lines = text.count("\n")
-    height = shutil.get_terminal_size((80, 20)).lines
+def display(text):
+    env = os.environ.copy()
+    env["LESSCHARSET"] = "utf-8"
 
-    if lines > height * 2:
-        env = os.environ.copy()
-        env["LESSCHARSET"] = "utf-8"
-
-        subprocess.run(
-            ["less", "-R"],
-            input=text,
-            text=True,
-            env=env
-        )
-    else:
-        print(text)
+    subprocess.run(
+        ["less", "-FRX"],
+        input=text,
+        text=True,
+        env=env,
+    )
 
 # ----------------------------
 # LIST
