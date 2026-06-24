@@ -184,8 +184,13 @@ def snapshot(name):
     latest = SNAPSHOTS / name / "latest.jsonl"
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
+    # Never snapshot fj's own metadata store.
     files = sorted(
-        (f for f in root.rglob("*") if f.is_file()),
+        (
+            f for f in root.rglob("*")
+            if f.is_file()
+            and STORE not in f.parents
+        ),
         key=lambda p: str(p)
     )
     total = len(files)
