@@ -123,13 +123,13 @@ def generate_name(projects):
 
 def add_project(path, name=None):
     if name and not validate_name(name):
-        print("Invalid project name")
+        print("Invalid project name", file=sys.stderr)
         sys.exit(1)
 
     projects = load_projects()
 
     if not path:
-        print("Usage: fj add <path> [--name name]")
+        print("Usage: fj add <path> [--name name]", file=sys.stderr)
         sys.exit(1)
 
     path = normalize_path(path)
@@ -138,17 +138,17 @@ def add_project(path, name=None):
         name = generate_name(projects)
 
     if name in projects:
-        print("Error: name already exists")
+        print("Error: name already exists", file=sys.stderr)
         sys.exit(1)
 
     p = Path(path)
 
     if not p.exists():
-        print("Path does not exist")
+        print("Path does not exist", file=sys.stderr)
         sys.exit(1)
 
     if not p.is_dir():
-        print("Path is not a directory")
+        print("Path is not a directory", file=sys.stderr)
         sys.exit(1)
 
     projects[name] = path
@@ -174,7 +174,7 @@ def snapshot(name):
     projects = load_projects()
 
     if name not in projects:
-        print("Unknown project")
+        print("Unknown project", file=sys.stderr)
         sys.exit(1)
 
     root = Path(projects[name]).resolve()
@@ -230,12 +230,12 @@ def view(name, out_file=None):
     projects = load_projects()
 
     if name not in projects:
-        print("Unknown project")
+        print("Unknown project", file=sys.stderr)
         sys.exit(1)
 
     latest = SNAPSHOTS / name / "latest.jsonl"
     if not latest.exists():
-        print("No snapshot found")
+        print("No snapshot found", file=sys.stderr)
         sys.exit(1)
 
     root_path = Path(projects[name])
@@ -299,7 +299,7 @@ def tree(name, out_file=None):
     projects = load_projects()
 
     if name not in projects:
-        print("Unknown project")
+        print("Unknown project", file=sys.stderr)
         sys.exit(1)
 
     root_path = Path(projects[name])
@@ -307,7 +307,7 @@ def tree(name, out_file=None):
 
     paths = load_snapshot_paths(name)
     if not paths:
-        print("No snapshot found")
+        print("No snapshot found", file=sys.stderr)
         sys.exit(1)
 
     t = build_tree(paths)
@@ -339,7 +339,7 @@ def diff(name, a, b):
     B = SNAPSHOTS / name / f"{b}.jsonl"
 
     if not A.exists() or not B.exists():
-        print("Snapshot not found")
+        print("Snapshot not found", file=sys.stderr)
         sys.exit(1)
 
     A = load_snapshot(A)
@@ -444,27 +444,27 @@ def main():
             i = sys.argv.index("--name")
 
             if i + 1 >= len(sys.argv):
-                print("--name requires a value")
+                print("--name requires a value", file=sys.stderr)
                 sys.exit(1)
 
             name = sys.argv[i + 1]
 
             if name.startswith("-"):
-                print("--name requires a value")
+                print("--name requires a value", file=sys.stderr)
                 sys.exit(1)
 
         add_project(path, name)
 
     elif cmd == "snapshot":
         if len(sys.argv) != 3:
-            print("Usage: fj snapshot <name>")
+            print("Usage: fj snapshot <name>", file=sys.stderr)
             sys.exit(1)
 
         snapshot(sys.argv[2])
 
     elif cmd == "view":
         if len(sys.argv) < 3:
-            print("Usage: fj view <name> [--out file]")
+            print("Usage: fj view <name> [--out file]", file=sys.stderr)
             sys.exit(1)
 
         name = sys.argv[2]
@@ -474,20 +474,20 @@ def main():
             i = sys.argv.index("--out")
 
             if i + 1 >= len(sys.argv):
-                print("--out requires a value")
+                print("--out requires a value", file=sys.stderr)
                 sys.exit(1)
 
             out = sys.argv[i + 1]
 
             if out.startswith("-"):
-                print("--out requires a value")
+                print("--out requires a value", file=sys.stderr)
                 sys.exit(1)
 
         view(name, out)
 
     elif cmd == "tree":
         if len(sys.argv) < 3:
-            print("Usage: fj tree <name> [--out file]")
+            print("Usage: fj tree <name> [--out file]", file=sys.stderr)
             sys.exit(1)
 
         name = sys.argv[2]
@@ -497,13 +497,13 @@ def main():
             i = sys.argv.index("--out")
 
             if i + 1 >= len(sys.argv):
-                print("--out requires a value")
+                print("--out requires a value", file=sys.stderr)
                 sys.exit(1)
 
             out = sys.argv[i + 1]
 
             if out.startswith("-"):
-                print("--out requires a value")
+                print("--out requires a value", file=sys.stderr)
                 sys.exit(1)
 
         tree(name, out)
