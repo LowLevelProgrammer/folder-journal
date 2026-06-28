@@ -9,10 +9,123 @@ import subprocess
 import os
 import random
 import tempfile
+import platform
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
+from time import perf_counter
 import unicodedata
+
+# ----------------------------
+# GLOBALS
+# ----------------------------
+
+STORE = Path.home() / ".fj-store"
+PROJECTS = STORE / "projects.json"
+SNAPSHOTS = STORE / "snapshots"
+BENCHMARKS = STORE / "benchmarks"
+BENCH = False
+BENCH_TIMES = {}
+
+
+# ----------------------------
+# BENCHMARKING
+# ----------------------------
+
+
+def bench_start():
+    if not BENCH:
+        return
+    return perf_counter()
+
+
+def bench_end(name, start):
+    if not BENCH or start is None:
+        return
+
+    BENCH_TIMES[name] = BENCH_TIMES.get(name, 0) + (perf_counter() - start)
+
+
+def cpu_name():
+    with open("/proc/cpuinfo") as f:
+        for line in f:
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+
+    return "Unknown"
+
+
+def bench_report(
+    project: str,
+    root: Path,
+    files: int,
+    total_bytes: int,
+):
+    lines = []
+
+    now = datetime.now()
+
+    lines.append("fj benchmark")
+    lines.append("============")
+    lines.append("")
+
+    lines.append("Timestamp")
+    lines.append("---------")
+    lines.append(now.strftime("%Y-%m-%d %H:%M:%S"))
+    lines.append("")
+
+    lines.append("Project")
+    lines.append("-------")
+    lines.append(f"Name : {project}")
+    lines.append(f"Root : {root}")
+    lines.append("")
+
+    lines.append("Dataset")
+    lines.append("-------")
+    lines.append(f"Files : {files:,}")
+    lines.append(f"Size  : {total_bytes:,} bytes")
+    lines.append("")
+
+    lines.append("Timings")
+    lines.append("-------")
+
+    total = 0.0
+
+    for name, value in BENCH_TIMES.items():
+        total += value
+        lines.append(f"{name:<16}{value:>8.3f} s")
+
+    lines.append("-" * 24)
+    lines.append(f"{'Total':<16}{total:>8.3f} s")
+    lines.append("")
+
+    hash_time = BENCH_TIMES["Hashing"]
+    throughput = total_bytes / hash_time
+    throughput_mib = throughput / (1024 * 1024)
+    lines.append("Hash Throughput")
+    lines.append("---------------")
+    lines.append(f"{throughput_mib:.2f} MiB/s")
+    lines.append("")
+
+    lines.append("System")
+    lines.append("------")
+    lines.append(f"Python : {platform.python_version()}")
+    lines.append(f"OS     : {platform.system()}")
+    lines.append(f"Kernel : {platform.release()}")
+    lines.append(f"Machine: {platform.machine()}")
+    lines.append(f"CPU    : {cpu_name()}")
+
+    text = "\n".join(lines) + "\n"
+
+    print(text)
+
+    BENCHMARKS.mkdir(parents=True, exist_ok=True)
+
+    atomic_write(
+        BENCHMARKS / f"{int(now.timestamp())}.txt",
+        text,
+    )
+
 
 # ----------------------------
 # HELPER
@@ -49,14 +162,6 @@ def atomic_write(path: Path, data: str):
 
 
 # ----------------------------
-# STORE PATHS
-# ----------------------------
-
-STORE = Path.home() / ".fj-store"
-PROJECTS = STORE / "projects.json"
-SNAPSHOTS = STORE / "snapshots"
-
-# ----------------------------
 # INIT STORE
 # ----------------------------
 
@@ -64,6 +169,7 @@ SNAPSHOTS = STORE / "snapshots"
 def init_store():
     STORE.mkdir(parents=True, exist_ok=True)
     SNAPSHOTS.mkdir(parents=True, exist_ok=True)
+    BENCHMARKS.mkdir(parents=True, exist_ok=True)
 
     if not PROJECTS.exists():
         PROJECTS.write_text("{}")
@@ -221,6 +327,8 @@ def snapshot(name):
     latest = SNAPSHOTS / name / "latest.jsonl"
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
+    t = bench_start()
+
     # Never snapshot fj's own metadata store.
     files = sorted(
         (f for f in root.rglob("*") if f.is_file() and STORE not in f.parents),
@@ -228,9 +336,14 @@ def snapshot(name):
     )
     total = len(files)
 
+    bench_end("Traversal", t)
+
     print(f"Snapshot: {name}")
     print(f"Root: {root}")
     print(f"Files: {total}\n")
+
+    t = bench_start()
+    total_bytes = 0
 
     lines = []
 
@@ -239,6 +352,8 @@ def snapshot(name):
             rel = to_relative(f.resolve(), root)
             if rel is None:
                 continue
+
+            total_bytes += f.stat().st_size
 
             entry = {
                 "snapshot": ts,
@@ -255,13 +370,25 @@ def snapshot(name):
             pct = int(i * 100 / total)
             print(f"\rProgress: {i}/{total} ({pct}%)", end="")
 
+    bench_end("Hashing", t)
+
+    t = bench_start()
+
     data = "\n".join(lines) + "\n"
 
+    bench_end("Serialization", t)
+
+    t = bench_start()
     # atomic snapshot write
     atomic_write(out_file, data)
     atomic_write(latest, data)
 
+    bench_end("Writing", t)
+
     print(f"\nDone snapshot: {name} ({ts})")
+
+    if BENCH:
+        bench_report(project=name, root=root, files=total, total_bytes=total_bytes)
 
 
 # ----------------------------
@@ -514,6 +641,12 @@ DIFF:
 
 
 def main():
+    global BENCH
+
+    if "--bench" in sys.argv:
+        BENCH = True
+        sys.argv.remove("--bench")
+
     if len(sys.argv) < 2:
         usage()
         return
