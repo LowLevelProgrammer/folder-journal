@@ -10,6 +10,7 @@ import os
 import random
 import tempfile
 import platform
+from blake3 import blake3
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
@@ -26,7 +27,8 @@ SNAPSHOTS = STORE / "snapshots"
 BENCHMARKS = STORE / "benchmarks"
 BENCH = False
 BENCH_TIMES = {}
-
+HASHING_ALGORITHM = "blake3"
+CHUNK_SIZE = 1024 * 1024
 
 # ----------------------------
 # BENCHMARKING
@@ -84,6 +86,12 @@ def bench_report(
     lines.append("-------")
     lines.append(f"Files : {files:,}")
     lines.append(f"Size  : {total_bytes:,} bytes")
+    lines.append("")
+
+    lines.append("Hasher")
+    lines.append("------")
+    lines.append(f"Algorithm : {HASHING_ALGORITHM}")
+    lines.append(f"Chunk size : {CHUNK_SIZE / (1024 * 1024)} MiB")
     lines.append("")
 
     lines.append("Timings")
@@ -308,9 +316,25 @@ def add_project(path, name=None):
 def sha256_file(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+        for chunk in iter(lambda: f.read(CHUNK_SIZE), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def blake3_file(path):
+    h = blake3()
+
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(CHUNK_SIZE), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def hash_file(path):
+    if HASHING_ALGORITHM == "sha256":
+        return sha256_file(path)
+    else:
+        return blake3_file(path)
 
 
 def snapshot(name):
@@ -358,7 +382,7 @@ def snapshot(name):
             entry = {
                 "snapshot": ts,
                 "path": rel,
-                "hash": sha256_file(f),
+                "hash": hash_file(f),
             }
 
             lines.append(json.dumps(entry))
@@ -642,10 +666,27 @@ DIFF:
 
 def main():
     global BENCH
+    global HASHING_ALGORITHM
 
     if "--bench" in sys.argv:
         BENCH = True
         sys.argv.remove("--bench")
+
+    if "--algo" in sys.argv:
+        i = sys.argv.index("--algo")
+
+        if i + 1 >= len(sys.argv):
+            print("--algo requires a name for hashing algorithm", file=sys.stderr)
+            sys.exit(1)
+
+        if sys.argv[i + 1] not in {"sha256", "blake3"}:
+            print("should be a valid/available hashing algorithm", file=sys.stderr)
+            sys.exit(1)
+
+        HASHING_ALGORITHM = sys.argv[i + 1]
+
+        sys.argv.pop(i)
+        sys.argv.pop(i)
 
     if len(sys.argv) < 2:
         usage()
